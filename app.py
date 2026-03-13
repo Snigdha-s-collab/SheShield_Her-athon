@@ -1,23 +1,23 @@
 import streamlit as st
 import requests
+from geopy.geocoders import Nominatim
+import folium
+from streamlit_folium import st_folium
 
-st.set_page_config(page_title="SafeCity", page_icon="🚨", layout="wide")
+st.set_page_config(page_title="SheShield", page_icon="🚨", layout="wide")
 
 # ---------- CUSTOM STYLE ----------
 st.markdown("""
 <style>
 
-/* App background */
 .stApp {
     background-color: #fff5f8;
 }
 
-/* Make all text black */
 body, p, span, div {
     color: black !important;
 }
 
-/* Titles */
 h1 {
     color: #ff2e88;
 }
@@ -26,18 +26,15 @@ h2, h3 {
     color: #c2185b;
 }
 
-/* Sidebar */
 [data-testid="stSidebar"] {
     background-color: #ffe4ec;
 }
 
-/* Sidebar navigation label */
 [data-testid="stSidebar"] label {
     color: black !important;
     font-weight: bold;
 }
 
-/* Buttons */
 .stButton>button {
     background: linear-gradient(90deg,#ff4da6,#ff2e88);
     color: white;
@@ -51,25 +48,17 @@ h2, h3 {
     background: linear-gradient(90deg,#ff2e88,#ff0066);
 }
 
-/* Input boxes */
 input, textarea {
     background-color: #ffb6d9 !important;
     color: black !important;
     border-radius: 10px;
 }
 
-/* Select boxes */
 div[data-baseweb="select"] {
     background-color: #ffb6d9 !important;
     border-radius: 10px;
 }
 
-/* Placeholder text */
-::placeholder {
-    color: #5a5a5a !important;
-}
-
-/* Card style */
 .card {
     padding: 20px;
     border-radius: 15px;
@@ -80,18 +69,16 @@ div[data-baseweb="select"] {
 </style>
 """, unsafe_allow_html=True)
 
-st.divider()
-
 # ---------- SIDEBAR ----------
 menu = st.sidebar.selectbox(
     "Navigation",
-    ["Home", "Report Incident", "Legal Chatbot"]
+    ["Home", "Report Incident", "Safety Map"]
 )
 
 # ---------- HOME ----------
 if menu == "Home":
 
-    st.header("🏠 Welcome to SafeCity")
+    st.header("🏠 Welcome to SheShield")
 
     col1, col2 = st.columns(2)
 
@@ -106,10 +93,11 @@ if menu == "Home":
     with col2:
         st.markdown("""
         <div class="card">
-        <h3>🤖 Legal Assistance</h3>
-        <p>Ask legal questions and get guidance on harassment laws and safety actions.</p>
+        <h3>🗺️ Safety Map</h3>
+        <p>View reported unsafe areas on an interactive safety map.</p>
         </div>
         """, unsafe_allow_html=True)
+
 
 # ---------- REPORT INCIDENT ----------
 elif menu == "Report Incident":
@@ -118,46 +106,84 @@ elif menu == "Report Incident":
 
     incident_type = st.selectbox(
         "Incident Type",
-        ["Harassment", "Stalking", "Verbal Abuse", "Other"]
+        ["stalking", "harassment", "domestic_violence", "eve_teasing", "cybercrime", "other"]
     )
 
     location = st.text_input("Location")
 
     description = st.text_area("Describe the incident")
 
+    severity = st.selectbox(
+        "Severity",
+        ["low", "medium", "high"]
+    )
+
     if st.button("Submit Report"):
 
-        data = {
-            "incident_type": incident_type,
-            "location": location,
-            "description": description
-        }
+        geolocator = Nominatim(user_agent="sheshield")
 
-        try:
-            requests.post("http://127.0.0.1:5000/report", json=data)
-            st.success("✅ Report submitted successfully!")
-        except:
-            st.error("⚠ Backend not connected")
+        location_data = geolocator.geocode(location)
 
-# ---------- CHATBOT ----------
-elif menu == "Legal Chatbot":
+        if location_data is None:
+            st.error("⚠ Location not found. Please enter a valid place.")
+        else:
+            latitude = location_data.latitude
+            longitude = location_data.longitude
 
-    st.header("🤖 Legal Assistance Chatbot")
+            data = {
+                "incident_type": incident_type,
+                "description": description,
+                "latitude": latitude,
+                "longitude": longitude,
+                "area_name": location,
+                "severity": severity
+            }
 
-    question = st.text_input("Ask your legal question")
+            try:
+                response = requests.post(
+                    "http://127.0.0.1:5000/api/reports",
+                    json=data
+                )
 
-    if st.button("Ask"):
+                if response.status_code == 201:
+                    st.success("✅ Report submitted successfully!")
+                else:
+                    st.error("⚠ Failed to submit report")
 
-        try:
-            response = requests.post(
-                "http://127.0.0.1:5000/chatbot",
-                json={"question": question}
-            )
+            except:
+                st.error("⚠ Backend server not running")
 
-            answer = response.json()["response"]
 
-            st.write("💬 Chatbot Response")
-            st.info(answer)
+# ---------- SAFETY MAP ----------
+elif menu == "Safety Map":
 
-        except:
-            st.error("⚠ Chatbot backend not connected")
+    st.header("🗺️ Safety Map")
+
+    try:
+        response = requests.get("http://127.0.0.1:5000/api/reports/map")
+        data = response.json()
+
+        # Map centered on India
+        m = folium.Map(location=[22.5937, 78.9629], zoom_start=5)
+
+        for point in data["points"]:
+
+            severity = point["severity"]
+
+            if severity == "high":
+                color = "red"
+            elif severity == "medium":
+                color = "orange"
+            else:
+                color = "green"
+
+            folium.Marker(
+                location=[point["latitude"], point["longitude"]],
+                popup=f"{point['area_name']}<br>{point['incident_type']} ({severity})",
+                icon=folium.Icon(color=color)
+            ).add_to(m)
+
+        st_folium(m, width=900, height=500)
+
+    except Exception as e:
+        st.error(f"⚠ Unable to load map: {e}")
