@@ -72,13 +72,14 @@ div[data-baseweb="select"] {
 # ---------- SIDEBAR ----------
 menu = st.sidebar.selectbox(
     "Navigation",
-    ["Home", "Report Incident", "Safety Map"]
+    ["Home", "Report Incident", "Safety Map", "AI Legal Chatbot"]
 )
 
 # ---------- HOME ----------
 if menu == "Home":
 
-    st.header("🏠 Welcome to SheShield")
+    st.title("🚨 SheShield")
+    st.write("A platform for reporting incidents and accessing safety information.")
 
     col1, col2 = st.columns(2)
 
@@ -93,7 +94,7 @@ if menu == "Home":
     with col2:
         st.markdown("""
         <div class="card">
-        <h3>🗺️ Safety Map</h3>
+        <h3>🗺 Safety Map</h3>
         <p>View reported unsafe areas on an interactive safety map.</p>
         </div>
         """, unsafe_allow_html=True)
@@ -110,7 +111,6 @@ elif menu == "Report Incident":
     )
 
     location = st.text_input("Location")
-
     description = st.text_area("Describe the incident")
 
     severity = st.selectbox(
@@ -120,50 +120,53 @@ elif menu == "Report Incident":
 
     if st.button("Submit Report"):
 
-        geolocator = Nominatim(user_agent="sheshield")
-
-        location_data = geolocator.geocode(location)
-
-        if location_data is None:
-            st.error("⚠ Location not found. Please enter a valid place.")
+        if location == "" or description == "":
+            st.warning("Please fill all fields")
         else:
-            latitude = location_data.latitude
-            longitude = location_data.longitude
 
-            data = {
-                "incident_type": incident_type,
-                "description": description,
-                "latitude": latitude,
-                "longitude": longitude,
-                "area_name": location,
-                "severity": severity
-            }
+            geolocator = Nominatim(user_agent="sheshield")
+            location_data = geolocator.geocode(location)
 
-            try:
-                response = requests.post(
-                    "http://127.0.0.1:5000/api/reports",
-                    json=data
-                )
+            if location_data is None:
+                st.error("Location not found.")
+            else:
 
-                if response.status_code == 201:
-                    st.success("✅ Report submitted successfully!")
-                else:
-                    st.error("⚠ Failed to submit report")
+                latitude = location_data.latitude
+                longitude = location_data.longitude
 
-            except:
-                st.error("⚠ Backend server not running")
+                data = {
+                    "incident_type": incident_type,
+                    "description": description,
+                    "latitude": latitude,
+                    "longitude": longitude,
+                    "area_name": location,
+                    "severity": severity
+                }
+
+                try:
+                    response = requests.post(
+                        "http://127.0.0.1:5000/api/reports",
+                        json=data
+                    )
+
+                    if response.status_code == 201:
+                        st.success("Report submitted successfully")
+                    else:
+                        st.error("Failed to submit report")
+
+                except:
+                    st.error("Backend server not running")
 
 
 # ---------- SAFETY MAP ----------
 elif menu == "Safety Map":
 
-    st.header("🗺️ Safety Map")
+    st.header("🗺 Safety Map")
 
     try:
         response = requests.get("http://127.0.0.1:5000/api/reports/map")
         data = response.json()
 
-        # Map centered on India
         m = folium.Map(location=[22.5937, 78.9629], zoom_start=5)
 
         for point in data["points"]:
@@ -179,11 +182,37 @@ elif menu == "Safety Map":
 
             folium.Marker(
                 location=[point["latitude"], point["longitude"]],
-                popup=f"{point['area_name']}<br>{point['incident_type']} ({severity})",
+                popup=f"{point['area_name']} - {point['incident_type']} ({severity})",
                 icon=folium.Icon(color=color)
             ).add_to(m)
 
         st_folium(m, width=900, height=500)
 
     except Exception as e:
-        st.error(f"⚠ Unable to load map: {e}")
+        st.error(f"Unable to load map: {e}")
+
+
+# ---------- AI LEGAL CHATBOT ----------
+elif menu == "AI Legal Chatbot":
+
+    st.header("⚖ AI Legal Chatbot")
+
+    question = st.text_area("Ask a legal question")
+
+    if st.button("Ask AI"):
+
+        try:
+            response = requests.post(
+                "http://127.0.0.1:5000/chatbot",
+                json={"question": question}
+            )
+
+            data = response.json()
+
+            if "response" in data:
+                st.markdown(data["response"])
+            else:
+                st.error("Error getting response")
+
+        except:
+            st.error("Backend server not running")
