@@ -198,28 +198,35 @@ def chatbot():
     try:
         # Send question to Ollama AI (Llama 3)
         response = requests.post(
-            "http://localhost:11434/api/generate",
-            json={
-                "model": "llama3",
-                "prompt": f"""
-You are a legal assistant helping women in India.
+    "http://localhost:11434/api/generate",
+    json={
+        "model": "phi3",
+        "prompt": f"""
+You are an AI assistant helping women in India understand their legal rights and safety options.
 
-Explain laws related to:
-- harassment
-- stalking
-- cybercrime
-- domestic violence
+When answering:
+1. Explain the relevant law briefly (IPC section if applicable)
+2. Provide clear steps the victim can take
+3. Suggest safety actions
+4. Include important helpline numbers
 
-Include:
-• relevant IPC laws
-• steps the victim can take
-• helpline numbers
+Important helplines in India:
+• Police: 100
+• Women Helpline: 1091
+• Emergency: 112
+• Domestic Violence Helpline: 181
+• Cyber Crime Helpline: 1930
+
+Keep the explanation simple and supportive.
 
 Question: {question}
 """,
-                "stream": False
-            }
-        )
+        "stream": False,
+        "options": {
+            "num_predict": 150
+        }
+    }
+)
 
         answer = response.json()["response"]
 
