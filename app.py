@@ -3,6 +3,8 @@ import requests
 from geopy.geocoders import Nominatim
 import folium
 from streamlit_folium import st_folium
+from streamlit_geolocation import streamlit_geolocation
+from geopy.distance import geodesic
 
 st.set_page_config(page_title="SheShield", page_icon="🚨", layout="wide")
 
@@ -72,8 +74,12 @@ div[data-baseweb="select"] {
 # ---------- SIDEBAR ----------
 menu = st.sidebar.selectbox(
     "Navigation",
-    ["Home", "Report Incident", "Safety Map", "AI Legal Chatbot" ,"Nearby Police Stations"]
+    ["Home", "Report Incident", "Safety Map", "AI Legal Chatbot", "Nearby Police Stations"]
 )
+
+
+
+
 
 # ---------- HOME ----------
 if menu == "Home":
@@ -129,7 +135,6 @@ elif menu == "Report Incident":
         ["stalking", "harassment", "domestic_violence", "eve_teasing", "cybercrime", "other"]
     )
 
-    location = st.text_input("Location")
     description = st.text_area("Describe the incident")
 
     severity = st.selectbox(
@@ -137,44 +142,78 @@ elif menu == "Report Incident":
         ["low", "medium", "high"]
     )
 
-    if st.button("Submit Report"):
+    st.markdown("### 📍 Provide Location")
 
-        if location == "" or description == "":
-            st.warning("Please fill all fields")
-        else:
+    location_method = st.radio(
+        "Choose how to provide location",
+        ["Use Live Location", "Enter Location Manually"]
+    )
+
+    lat = None
+    lon = None
+    area_name = ""
+
+    # Live GPS location
+    if location_method == "Use Live Location":
+
+        location = streamlit_geolocation()
+
+        if location:
+
+            lat = location["latitude"]
+            lon = location["longitude"]
+            area_name = "Live Location"
+
+            st.success("Live location detected")
+
+    # Manual location backup
+    elif location_method == "Enter Location Manually":
+
+        location_input = st.text_input("Enter location")
+
+        if location_input:
 
             geolocator = Nominatim(user_agent="sheshield")
-            location_data = geolocator.geocode(location)
+            location_data = geolocator.geocode(location_input)
 
-            if location_data is None:
-                st.error("Location not found.")
+            if location_data:
+
+                lat = location_data.latitude
+                lon = location_data.longitude
+                area_name = location_input
+
             else:
+                st.error("Location not found")
 
-                latitude = location_data.latitude
-                longitude = location_data.longitude
+    if st.button("Submit Report"):
 
-                data = {
-                    "incident_type": incident_type,
-                    "description": description,
-                    "latitude": latitude,
-                    "longitude": longitude,
-                    "area_name": location,
-                    "severity": severity
-                }
+        if lat is None or lon is None or description == "":
+            st.warning("Please provide description and location")
 
-                try:
-                    response = requests.post(
-                        "http://127.0.0.1:5000/api/reports",
-                        json=data
-                    )
+        else:
 
-                    if response.status_code == 201:
-                        st.success("Report submitted successfully")
-                    else:
-                        st.error("Failed to submit report")
+            data = {
+                "incident_type": incident_type,
+                "description": description,
+                "latitude": lat,
+                "longitude": lon,
+                "area_name": area_name,
+                "severity": severity
+            }
 
-                except:
-                    st.error("Backend server not running")
+            try:
+                response = requests.post(
+                    "http://127.0.0.1:5000/api/reports",
+                    json=data
+                )
+
+                if response.status_code == 201:
+                    st.success("Report submitted successfully")
+                else:
+                    st.error("Failed to submit report")
+
+            except:
+                st.error("Backend server not running")
 
 
 # ---------- SAFETY MAP ----------
@@ -226,7 +265,9 @@ This tool **does not provide official legal advice**.
 For verified information, please consult a legal professional or relevant authorities.
 """)
 
-    agree = st.checkbox("I understand that this chatbot provides general information and not legal advice.")
+    agree = st.checkbox(
+        "I understand that this chatbot provides general information and not legal advice."
+    )
 
     if agree:
 
@@ -237,7 +278,7 @@ For verified information, please consult a legal professional or relevant author
 
         if question:
 
-            # show user message
+            # store user question
             st.session_state.chat_history.append(("user", question))
 
             try:
@@ -247,15 +288,17 @@ For verified information, please consult a legal professional or relevant author
                 )
 
                 data = response.json()
-
-                answer = data.get("response", "Sorry, I could not generate a response.")
+                answer = data.get(
+                    "response",
+                    "Sorry, I could not generate a response at the moment."
+                )
 
                 st.session_state.chat_history.append(("bot", answer))
 
             except:
                 st.error("Backend server not running")
 
-        # display chat messages
+        # display chat history
         for role, message in st.session_state.chat_history:
 
             if role == "user":
@@ -263,112 +306,187 @@ For verified information, please consult a legal professional or relevant author
                     st.write(message)
 
             else:
-              with st.chat_message("assistant"):
-               st.write(message)
+                with st.chat_message("assistant"):
 
-               st.markdown("### 🚨 Emergency Helplines")
+                    st.write(message)
 
-               st.info("""
-                 📞 **Police:** 100  
-                 📞 **Women Helpline:** 1091  
-                 📞 **Domestic Violence:** 181  
-                 📞 **Cyber Crime:** 1930  
-                 📞 **Emergency:** 112
-               """)
+                    st.markdown("### 🚨 Emergency Helplines")
 
-        st.markdown("""
-💡 **What you should do in most situations:**
-• Stay in a safe place and avoid confrontation  
-• Save evidence (messages, screenshots, photos)  
-• Inform a trusted friend or family member  
-• Report the incident to the nearest police station or cybercrime portal  
-• Use the helpline numbers above if you feel unsafe
+                    st.info("""
+📞 **Police:** 100  
+📞 **Women Helpline:** 1091  
+📞 **Domestic Violence:** 181  
+📞 **Cyber Crime:** 1930  
+📞 **Emergency:** 112  
+📞 **National Commission for Women:** 7827170170
+""")
+
+                    # Smart advice detection
+                    last_question = st.session_state.chat_history[-1][1].lower()
+
+                    if "stalk" in last_question:
+
+                        st.markdown("""
+💡 **If you are facing stalking:**
+• Avoid responding to the person  
+• Save messages or evidence  
+• Inform trusted friends or family  
+• File a complaint under **IPC Section 354D (Stalking)**  
+""")
+
+                    elif "harass" in last_question:
+
+                        st.markdown("""
+💡 **If you are facing harassment:**
+• Move to a safe place immediately  
+• Record details of the incident  
+• Seek help from nearby people  
+• Report under **IPC Section 354A**
+""")
+
+                    elif "cyber" in last_question or "online" in last_question:
+
+                        st.markdown("""
+💡 **If you are facing cybercrime:**
+• Take screenshots of messages or posts  
+• Block the offender  
+• Report on the **National Cyber Crime Portal**  
+• Call the **Cyber Crime Helpline: 1930**
+""")
+
+                    else:
+
+                        st.markdown("""
+💡 **General Safety Advice:**
+• Stay calm and move to a safe area  
+• Inform someone you trust  
+• Collect evidence if possible  
+• Report the issue to the nearest police station  
 """)
         
 # ---------- NEARBY POLICE STATIONS ----------
 elif menu == "Nearby Police Stations":
 
-    st.header("👮 Find Nearby Police Stations")
+    st.header("👮 Nearby Police Stations")
 
-    if "map_data" not in st.session_state:
-        st.session_state.map_data = None
-        st.session_state.stations = []
+    st.markdown("### 📍 Detecting your live location...")
 
-    location = st.text_input("Enter your city or area")
+    location = streamlit_geolocation()
 
-    if st.button("Search Police Stations"):
+    lat = None
+    lon = None
+
+    # LIVE LOCATION
+    if location:
+        lat = location["latitude"]
+        lon = location["longitude"]
+        st.success("Live location detected")
+
+    # MANUAL LOCATION BACKUP
+    st.markdown("### Or enter location manually")
+
+    manual_location = st.text_input("Enter your city or area")
+
+    if manual_location:
 
         geolocator = Nominatim(user_agent="sheshield")
-        location_data = geolocator.geocode(location)
+        location_data = geolocator.geocode(manual_location)
 
         if location_data:
-
             lat = location_data.latitude
             lon = location_data.longitude
-
-            st.success(f"Location found: {location}")
-
-            m = folium.Map(location=[lat, lon], zoom_start=13)
-
-            folium.Marker(
-                [lat, lon],
-                popup="Your Location",
-                icon=folium.Icon(color="blue")
-            ).add_to(m)
-
-            overpass_url = "https://overpass-api.de/api/interpreter"
-
-            query = f"""
-            [out:json];
-            node["amenity"="police"](around:5000,{lat},{lon});
-            out;
-            """
-
-            response = requests.get(overpass_url, params={'data': query})
-            data = response.json()
-
-            stations = []
-
-            if "elements" in data:
-
-                for element in data["elements"]:
-
-                    plat = element["lat"]
-                    plon = element["lon"]
-
-                    name = element.get("tags", {}).get("name", "Police Station")
-
-                    stations.append(name)
-
-                    folium.Marker(
-                        [plat, plon],
-                        popup=name,
-                        icon=folium.Icon(color="red")
-                    ).add_to(m)
-
-            # SAVE MAP
-            st.session_state.map_data = m
-            st.session_state.stations = stations
-
         else:
             st.error("Location not found")
 
-    # SHOW MAP AFTER BUTTON PRESS
-    if st.session_state.map_data:
-        map_container = st.container()
-        with map_container:
-         st_folium(
-         st.session_state.map_data,
-         width=900,
-         height=500,
-         key="police_map",
-         returned_objects=[]
-    )
+    # IF WE HAVE COORDINATES
+    if lat and lon:
 
-    # SHOW LIST
-    if st.session_state.stations:
+        m = folium.Map(location=[lat, lon], zoom_start=13)
 
-        st.subheader("📍 Nearby Police Stations")
+        # USER LOCATION MARKER
+        folium.Marker(
+            [lat, lon],
+            popup="Your Location",
+            icon=folium.Icon(color="blue")
+        ).add_to(m)
 
-        for i, station in enumerate(st.session_state.stations, start=1):
-            st.write(f"{i}. {station}")
+        # OVERPASS API QUERY
+        overpass_url = "https://overpass-api.de/api/interpreter"
+
+        query = f"""
+        [out:json];
+        (
+          node["amenity"="police"](around:10000,{lat},{lon});
+          way["amenity"="police"](around:10000,{lat},{lon});
+          relation["amenity"="police"](around:10000,{lat},{lon});
+        );
+        out center;
+        """
+
+        response = requests.get(overpass_url, params={"data": query})
+        data = response.json()
+
+        stations = []
+
+        if "elements" in data:
+
+            for element in data["elements"]:
+
+                if "lat" in element:
+                    plat = element["lat"]
+                    plon = element["lon"]
+                else:
+                    plat = element["center"]["lat"]
+                    plon = element["center"]["lon"]
+
+                tags = element.get("tags", {})
+
+                name = tags.get("name", "Police Station")
+
+                street = tags.get("addr:street", "")
+                city = tags.get("addr:city", "")
+                address = f"{street} {city}".strip()
+
+                # DISTANCE CALCULATION
+                distance = geodesic((lat, lon), (plat, plon)).km
+                distance = round(distance, 2)
+
+                stations.append((name, address, distance, plat, plon))
+
+                folium.Marker(
+                    [plat, plon],
+                    popup=f"<b>{name}</b><br>{address}<br>{distance} km away",
+                    icon=folium.Icon(color="red", icon="info-sign")
+                ).add_to(m)
+
+        # SORT BY DISTANCE (NEAREST FIRST)
+        stations.sort(key=lambda x: x[2])
+
+        # SHOW MAP
+        st_folium(m, width=900, height=500, key="police_map")
+
+        # SHOW STATION LIST
+        if stations:
+
+            st.subheader("📍 Nearby Police Stations")
+
+            for i, (name, address, distance, plat, plon) in enumerate(stations, start=1):
+
+                if i == 1:
+                    st.success(f"🚨 Nearest Police Station: {name} ({distance} km)")
+
+                st.write(f"### {i}. {name}")
+
+                if address:
+                    st.write(f"📍 Address: {address}")
+
+                st.write(f"📏 Distance: {distance} km")
+
+                google_maps_url = f"https://www.google.com/maps/dir/?api=1&destination={plat},{plon}"
+
+                st.markdown(f"[🧭 Navigate in Google Maps]({google_maps_url})")
+
+                st.markdown("---")
+
+        else:
+            st.warning("No police stations found within 10 km.")
