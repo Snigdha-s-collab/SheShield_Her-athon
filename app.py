@@ -367,22 +367,24 @@ For verified information, please consult a legal professional or relevant author
 # ---------- NEARBY POLICE STATIONS ----------
 elif menu == "Nearby Police Stations":
 
-    st.header("👮 Nearby Police Stations")
+    st.header("👮 Find Nearby Police Stations")
 
-    st.markdown("### 📍 Detecting your live location...")
+    st.markdown("📍 Detecting your live location...")
 
-    location = streamlit_geolocation()
+    location_data = streamlit_geolocation()
 
     lat = None
     lon = None
 
-    # LIVE LOCATION
-    if location:
-        lat = location["latitude"]
-        lon = location["longitude"]
+    # ---------- LIVE LOCATION ----------
+    if location_data and location_data.get("latitude"):
+
+        lat = location_data["latitude"]
+        lon = location_data["longitude"]
+
         st.success("Live location detected")
 
-    # MANUAL LOCATION BACKUP
+    # ---------- MANUAL LOCATION ----------
     st.markdown("### Or enter location manually")
 
     manual_location = st.text_input("Enter your city or area")
@@ -390,103 +392,118 @@ elif menu == "Nearby Police Stations":
     if manual_location:
 
         geolocator = Nominatim(user_agent="sheshield")
-        location_data = geolocator.geocode(manual_location)
 
-        if location_data:
-            lat = location_data.latitude
-            lon = location_data.longitude
+        location = geolocator.geocode(manual_location)
+
+        if location:
+            lat = location.latitude
+            lon = location.longitude
+            st.success(f"Location found: {manual_location}")
         else:
             st.error("Location not found")
 
-    # IF WE HAVE COORDINATES
+    # ---------- SEARCH POLICE STATIONS ----------
     if lat and lon:
 
-        m = folium.Map(location=[lat, lon], zoom_start=13)
+        m = folium.Map(location=[lat, lon], zoom_start=14)
 
-        # USER LOCATION MARKER
+        # User marker
         folium.Marker(
             [lat, lon],
             popup="Your Location",
             icon=folium.Icon(color="blue")
         ).add_to(m)
 
-        # OVERPASS API QUERY
         overpass_url = "https://overpass-api.de/api/interpreter"
 
         query = f"""
         [out:json];
-        (
-          node["amenity"="police"](around:10000,{lat},{lon});
-          way["amenity"="police"](around:10000,{lat},{lon});
-          relation["amenity"="police"](around:10000,{lat},{lon});
-        );
-        out center;
+        node["amenity"="police"](around:10000,{lat},{lon});
+        out;
         """
 
-        response = requests.get(overpass_url, params={"data": query})
-        data = response.json()
+        try:
+
+            response = requests.get(
+                overpass_url,
+                params={'data': query},
+                timeout=10
+            )
+
+            if response.status_code == 200:
+                data = response.json()
+            else:
+                st.error("Unable to fetch police station data")
+                data = {}
+
+        except:
+            st.error("Map server busy. Please try again.")
+            data = {}
 
         stations = []
 
         if "elements" in data:
 
+            from geopy.distance import geodesic
+
             for element in data["elements"]:
 
                 if "lat" in element:
+
                     plat = element["lat"]
                     plon = element["lon"]
-                else:
-                    plat = element["center"]["lat"]
-                    plon = element["center"]["lon"]
 
-                tags = element.get("tags", {})
+                    name = element.get("tags", {}).get(
+                        "name", "Police Station"
+                    )
 
-                name = tags.get("name", "Police Station")
+                    distance = geodesic((lat, lon), (plat, plon)).km
 
-                street = tags.get("addr:street", "")
-                city = tags.get("addr:city", "")
-                address = f"{street} {city}".strip()
+                    stations.append({
+                        "name": name,
+                        "lat": plat,
+                        "lon": plon,
+                        "distance": distance
+                    })
 
-                # DISTANCE CALCULATION
-                distance = geodesic((lat, lon), (plat, plon)).km
-                distance = round(distance, 2)
+        # ---------- SORT BY DISTANCE ----------
+        stations = sorted(stations, key=lambda x: x["distance"])
 
-                stations.append((name, address, distance, plat, plon))
+        # ---------- ADD MAP MARKERS ----------
+        for station in stations:
 
-                folium.Marker(
-                    [plat, plon],
-                    popup=f"<b>{name}</b><br>{address}<br>{distance} km away",
-                    icon=folium.Icon(color="red", icon="info-sign")
-                ).add_to(m)
+            folium.Marker(
+                [station["lat"], station["lon"]],
+                popup=f"{station['name']} ({station['distance']:.2f} km)",
+                icon=folium.Icon(color="red")
+            ).add_to(m)
 
-        # SORT BY DISTANCE (NEAREST FIRST)
-        stations.sort(key=lambda x: x[2])
+        # ---------- SHOW MAP ----------
+        st_folium(
+            m,
+            width=900,
+            height=500,
+            key="police_map",
+            returned_objects=[]
+        )
 
-        # SHOW MAP
-        st_folium(m, width=900, height=500, key="police_map")
-
-        # SHOW STATION LIST
+        # ---------- SHOW LIST ----------
         if stations:
 
-            st.subheader("📍 Nearby Police Stations")
+            st.subheader("📍 Police Stations (Nearest First)")
 
-            for i, (name, address, distance, plat, plon) in enumerate(stations, start=1):
+            for i, station in enumerate(stations[:10], start=1):
 
-                if i == 1:
-                    st.success(f"🚨 Nearest Police Station: {name} ({distance} km)")
+                google_maps_link = f"https://www.google.com/maps?q={station['lat']},{station['lon']}"
 
-                st.write(f"### {i}. {name}")
+                st.markdown(
+                    f"""
+**{i}. {station['name']}**  
+📏 Distance: {station['distance']:.2f} km  
 
-                if address:
-                    st.write(f"📍 Address: {address}")
-
-                st.write(f"📏 Distance: {distance} km")
-
-                google_maps_url = f"https://www.google.com/maps/dir/?api=1&destination={plat},{plon}"
-
-                st.markdown(f"[🧭 Navigate in Google Maps]({google_maps_url})")
-
-                st.markdown("---")
+🔗 [Open in Google Maps]({google_maps_link})
+"""
+                )
 
         else:
-            st.warning("No police stations found within 10 km.")
+            st.warning("No police stations found nearby")
