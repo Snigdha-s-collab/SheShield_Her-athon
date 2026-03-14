@@ -72,7 +72,7 @@ div[data-baseweb="select"] {
 # ---------- SIDEBAR ----------
 menu = st.sidebar.selectbox(
     "Navigation",
-    ["Home", "Report Incident", "Safety Map", "AI Legal Chatbot"]
+    ["Home", "Report Incident", "Safety Map", "AI Legal Chatbot" ,"Nearby Police Stations"]
 )
 
 # ---------- HOME ----------
@@ -84,21 +84,40 @@ if menu == "Home":
     col1, col2 = st.columns(2)
 
     with col1:
-        st.markdown("""
-        <div class="card">
-        <h3>📢 Report Incident</h3>
-        <p>Submit harassment reports to help identify unsafe areas and protect the community.</p>
-        </div>
-        """, unsafe_allow_html=True)
+      st.markdown("""
+      <div class="card">
+      <h3>📢 Report Incident</h3>
+      <p>Submit harassment reports to help identify unsafe areas and protect the community.</p>
+      </div>
+      """, unsafe_allow_html=True)
 
     with col2:
-        st.markdown("""
-        <div class="card">
-        <h3>🗺 Safety Map</h3>
-        <p>View reported unsafe areas on an interactive safety map.</p>
-        </div>
-        """, unsafe_allow_html=True)
+      st.markdown("""
+      <div class="card">
+      <h3>🗺 Safety Map</h3>
+      <p>View reported unsafe areas on an interactive safety map.</p>
+      </div>
+      """, unsafe_allow_html=True)
 
+      st.markdown("<br>", unsafe_allow_html=True)
+
+    col3, col4 = st.columns(2)
+
+    with col3:
+      st.markdown("""
+      <div class="card">
+      <h3>⚖ AI Legal Chatbot</h3>
+      <p>Ask legal questions and get instant guidance about women's safety laws.</p>
+      </div>
+      """, unsafe_allow_html=True)
+
+    with col4:
+      st.markdown("""
+      <div class="card">
+      <h3>👮 Nearby Police Stations</h3>
+      <p>Find nearby police stations quickly for emergency assistance.</p>
+      </div>
+      """, unsafe_allow_html=True)
 
 # ---------- REPORT INCIDENT ----------
 elif menu == "Report Incident":
@@ -197,22 +216,159 @@ elif menu == "AI Legal Chatbot":
 
     st.header("⚖ AI Legal Chatbot")
 
-    question = st.text_area("Ask a legal question")
+    st.warning("""
+⚠️ **Disclaimer**
 
-    if st.button("Ask AI"):
+This AI Legal Chatbot provides general legal information related to women's safety laws in India.  
+The responses are generated using an AI model and may not always be fully accurate or up-to-date.
 
-        try:
-            response = requests.post(
-                "http://127.0.0.1:5000/chatbot",
-                json={"question": question}
-            )
+This tool **does not provide official legal advice**.  
+For verified information, please consult a legal professional or relevant authorities.
+""")
 
+    agree = st.checkbox("I understand that this chatbot provides general information and not legal advice.")
+
+    if agree:
+
+        if "chat_history" not in st.session_state:
+            st.session_state.chat_history = []
+
+        question = st.chat_input("Ask a legal question about women's safety laws")
+
+        if question:
+
+            # show user message
+            st.session_state.chat_history.append(("user", question))
+
+            try:
+                response = requests.post(
+                    "http://127.0.0.1:5000/chatbot",
+                    json={"question": question}
+                )
+
+                data = response.json()
+
+                answer = data.get("response", "Sorry, I could not generate a response.")
+
+                st.session_state.chat_history.append(("bot", answer))
+
+            except:
+                st.error("Backend server not running")
+
+        # display chat messages
+        for role, message in st.session_state.chat_history:
+
+            if role == "user":
+                with st.chat_message("user"):
+                    st.write(message)
+
+            else:
+              with st.chat_message("assistant"):
+               st.write(message)
+
+               st.markdown("### 🚨 Emergency Helplines")
+
+               st.info("""
+                 📞 **Police:** 100  
+                 📞 **Women Helpline:** 1091  
+                 📞 **Domestic Violence:** 181  
+                 📞 **Cyber Crime:** 1930  
+                 📞 **Emergency:** 112
+               """)
+
+        st.markdown("""
+💡 **What you should do in most situations:**
+• Stay in a safe place and avoid confrontation  
+• Save evidence (messages, screenshots, photos)  
+• Inform a trusted friend or family member  
+• Report the incident to the nearest police station or cybercrime portal  
+• Use the helpline numbers above if you feel unsafe
+""")
+        
+# ---------- NEARBY POLICE STATIONS ----------
+elif menu == "Nearby Police Stations":
+
+    st.header("👮 Find Nearby Police Stations")
+
+    if "map_data" not in st.session_state:
+        st.session_state.map_data = None
+        st.session_state.stations = []
+
+    location = st.text_input("Enter your city or area")
+
+    if st.button("Search Police Stations"):
+
+        geolocator = Nominatim(user_agent="sheshield")
+        location_data = geolocator.geocode(location)
+
+        if location_data:
+
+            lat = location_data.latitude
+            lon = location_data.longitude
+
+            st.success(f"Location found: {location}")
+
+            m = folium.Map(location=[lat, lon], zoom_start=13)
+
+            folium.Marker(
+                [lat, lon],
+                popup="Your Location",
+                icon=folium.Icon(color="blue")
+            ).add_to(m)
+
+            overpass_url = "https://overpass-api.de/api/interpreter"
+
+            query = f"""
+            [out:json];
+            node["amenity"="police"](around:5000,{lat},{lon});
+            out;
+            """
+
+            response = requests.get(overpass_url, params={'data': query})
             data = response.json()
 
-            if "response" in data:
-                st.markdown(data["response"])
-            else:
-                st.error("Error getting response")
+            stations = []
 
-        except:
-            st.error("Backend server not running")
+            if "elements" in data:
+
+                for element in data["elements"]:
+
+                    plat = element["lat"]
+                    plon = element["lon"]
+
+                    name = element.get("tags", {}).get("name", "Police Station")
+
+                    stations.append(name)
+
+                    folium.Marker(
+                        [plat, plon],
+                        popup=name,
+                        icon=folium.Icon(color="red")
+                    ).add_to(m)
+
+            # SAVE MAP
+            st.session_state.map_data = m
+            st.session_state.stations = stations
+
+        else:
+            st.error("Location not found")
+
+    # SHOW MAP AFTER BUTTON PRESS
+    if st.session_state.map_data:
+        map_container = st.container()
+        with map_container:
+         st_folium(
+         st.session_state.map_data,
+         width=900,
+         height=500,
+         key="police_map",
+         returned_objects=[]
+    )
+
+    # SHOW LIST
+    if st.session_state.stations:
+
+        st.subheader("📍 Nearby Police Stations")
+
+        for i, station in enumerate(st.session_state.stations, start=1):
+            st.write(f"{i}. {station}")
